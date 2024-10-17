@@ -1,0 +1,248 @@
+SAMPLE = [
+    "C1-1",
+    "C1-2",
+]
+
+
+configfile: "workflow/config.yaml"
+
+BATCH = ["S1"]
+
+
+wildcard_constraints:
+    sample="C[1-8]-[1-6]",
+
+
+rule all:
+    input:
+        "report_qc/report_falco_before.html",
+        "report_qc/cutadapt_PE_qc.html",
+        "report_qc/report_falco_after.html",
+
+        "report_qc/report_mapping_hs_genome.html",
+        "report_qc/report_dedup_hs_genome.html",
+
+
+rule falco_before_PE:
+    input:
+        r1="raw_data/{sample}_S1_R1_001.fastq.gz",
+        r2="raw_data/{sample}_S1_R2_001.fastq.gz",
+    output:
+        "quality_control/falco_before/{sample}_PE_R1/fastqc_report.html",
+        "quality_control/falco_before/{sample}_PE_R1/fastqc_data.txt",
+        "quality_control/falco_before/{sample}_PE_R1/summary.txt",
+        "quality_control/falco_before/{sample}_PE_R2/fastqc_report.html",
+        "quality_control/falco_before/{sample}_PE_R2/fastqc_data.txt",
+        "quality_control/falco_before/{sample}_PE_R2/summary.txt",
+    params:
+        r1="quality_control/falco_before/{sample}_PE_R1",
+        r2="quality_control/falco_before/{sample}_PE_R2",
+        falco=config["falco"],
+    resources:
+        mem_mb=8000,
+    shell:
+        """
+        {params.falco} -o {params.r1} {input.r1}
+        {params.falco} -o {params.r2} {input.r2}
+        """
+
+
+rule report_falco_before:
+    input:
+        expand(
+            "quality_control/falco_before/{sample}_SE/fastqc_data.txt", sample=SAMPLE
+        )
+        if "S2" in BATCH
+        else [],
+        expand(
+            "quality_control/falco_before/{sample}_PE_R1/fastqc_data.txt",
+            sample=SAMPLE,
+        )
+        if "S1" in BATCH
+        else [],
+        expand(
+            "quality_control/falco_before/{sample}_PE_R2/fastqc_data.txt",
+            sample=SAMPLE,
+        )
+        if "S1" in BATCH
+        else [],
+    output:
+        "report_qc/report_falco_before.html",
+    threads: 2
+    resources:
+        mem_mb=8000,
+    shell:
+        "multiqc -f -m fastqc -n {output} {input}"
+
+
+rule cutadapt_PE:
+    input:
+        r1="raw_data/{sample}_S1_R1_001.fastq.gz",
+        r2="raw_data/{sample}_S1_R2_001.fastq.gz",
+    output:
+        out1="cutadapt_PE/trimmed_{sample}_R1.fq.gz",
+        out2="cutadapt_PE/trimmed_{sample}_R2.fq.gz",
+        report="cutadapt_PE/report/{sample}.cut1.report",
+    threads: 4
+    resources:
+        mem_mb=6000,
+    shell:
+        """
+        cutadapt -j {threads} -m 20 --nextseq-trim=6 --poly-a --trim-n\
+            -a "AGATCGGAAGAGCACACGTCTGAACTCCAGTCA" \
+            -A "AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT" \
+            -o {output.out1}  \
+            -p {output.out2}  \
+            {input.r1} {input.r2} > {output.report}
+        """
+
+
+rule report_cutadapt_PE:
+    input:
+        expand("cutadapt_PE/report/{sample}.cut1.report", sample=SAMPLE),
+    output:
+        "report_qc/cutadapt_PE_qc.html",
+    shell:
+        "multiqc -f -m cutadapt -n {output} {input}"
+
+
+rule falco_after_PE:
+    input:
+        r1="cutadapt_PE/trimmed_{sample}_R1.fq.gz",
+        r2="cutadapt_PE/trimmed_{sample}_R2.fq.gz",
+    output:
+        "quality_control/falco_after/{sample}_PE_R1/fastqc_report.html",
+        "quality_control/falco_after/{sample}_PE_R1/fastqc_data.txt",
+        "quality_control/falco_after/{sample}_PE_R1/summary.txt",
+        "quality_control/falco_after/{sample}_PE_R2/fastqc_report.html",
+        "quality_control/falco_after/{sample}_PE_R2/fastqc_data.txt",
+        "quality_control/falco_after/{sample}_PE_R2/summary.txt",
+    params:
+        r1="quality_control/falco_after/{sample}_PE_R1",
+        r2="quality_control/falco_after/{sample}_PE_R2",
+        falco=config["falco"],
+    resources:
+        mem_mb=8000,
+    shell:
+        """
+        {params.falco} -o {params.r1} {input.r1}
+        {params.falco} -o {params.r2} {input.r2}
+        """
+
+
+rule report_falco_after:
+    input:
+        expand(
+            "quality_control/falco_after/{sample}_SE/fastqc_data.txt", sample=SAMPLE
+        )
+        if "S2" in BATCH
+        else [],
+        expand(
+            "quality_control/falco_after/{sample}_PE_R1/fastqc_data.txt", sample=SAMPLE
+        )
+        if "S1" in BATCH
+        else [],
+        expand(
+            "quality_control/falco_after/{sample}_PE_R2/fastqc_data.txt", sample=SAMPLE
+        )
+        if "S1" in BATCH
+        else [],
+    output:
+        "report_qc/report_falco_after.html",
+    threads: 2
+    resources:
+        mem_mb=8000,
+    shell:
+        "multiqc -f -m fastqc -n {output} {input}"
+
+rule mapping_human_genome_PE:
+    input:
+        r1="cutadapt_PE/trimmed_{sample}_R1.fq.gz",
+        r2="cutadapt_PE/trimmed_{sample}_R2.fq.gz",
+    output:
+        bam="mapping_hs_genome/{sample}.genome.bam",
+        summary="mapping_hs_genome/summary/{sample}.summary",
+    params:
+        ref_hs_genome=config["ref_hs_genome"],
+        tmp="mapping_hs_genome/tmp",
+    threads: 12
+    resources:
+        mem_mb=6000,
+    shell:
+        """
+        hisat2 -p {threads}  \
+            -x {params.ref_hs_genome} -1 {input.r1} -2 {input.r2}\
+            -t --no-spliced-alignment --maxins 500 --minins 0 --no-unal \
+            --summary-file {output.summary} --new-summary \
+            | samtools view -@ {threads} -Shub - \
+            | samtools sort -T {params.tmp}/ -@ {threads} \
+            -o {output.bam}
+        """
+
+
+rule flag_sort_index_depth_hs_genome:
+    input:
+        "mapping_hs_genome/{sample}.genome.bam",
+    output:
+        flagstat="mapping_hs_genome/flagstat/{sample}.genome.flagstat",
+        index="mapping_hs_genome/{sample}.genome.bam.bai",
+    threads: 2
+    shell:
+        """
+        samtools flagstat {input} > {output.flagstat}
+        samtools index {input}
+        """
+
+
+
+rule report_mapping_hs_genome:
+    input:
+        expand("mapping_hs_genome/summary/{sample}.summary", sample=SAMPLE),
+        expand("mapping_hs_genome/flagstat/{sample}.genome.flagstat", sample=SAMPLE),
+    output:
+        "report_qc/report_mapping_hs_genome.html",
+    threads: 2
+    resources:
+        mem_mb=8000,
+    shell:
+        "multiqc -f -n {output} {input}"
+
+
+rule dedup_hs_genome:
+    input:
+        bam="mapping_hs_genome/{sample}.genome.bam",
+        index="mapping_hs_genome/{sample}.genome.bam.bai",
+    output:
+        dedup_bam="mapping_hs_genome/{sample}.genome.dedup.bam",
+        dedup_metrics="mapping_hs_genome/{sample}.genome.dedup.metrics",
+    params:
+        picard=config["picard"],
+        tmp="mapping_hs_genome/tmp",
+    threads: 1
+    resources:
+        mem_mb=24000,
+    shell:
+        """
+        java -Xmx24g -jar {params.picard} MarkDuplicates \
+            I={input.bam} O={output.dedup_bam} M={output.dedup_metrics} \
+            REMOVE_DUPLICATES=true ASSUME_SORTED=true VALIDATION_STRINGENCY=SILENT \
+            TMP_DIR={params.tmp}
+        """
+
+
+rule featureCounts_hs_genome:
+    input:
+        dedup_bam=expand("mapping_hs_genome/{sample}.genome.dedup.bam", sample=SAMPLE),
+    output:
+        counts="feature_counts/hs_genome/counts_hs_genome.txt",
+        summary="feature_counts/hs_genome/counts_hs_genome.txt.summary",
+    params:
+        ref_hs_genome_gtf=config["ref_hs_genome_gtf"],
+        featureCounts=config["featureCounts"],
+    threads: 12
+    resources:
+        mem_mb=4000,
+    shell:
+        """
+        {params.featureCounts} -T {threads} --countReadPairs -p -t exon -g gene_id -a {params.ref_hs_genome_gtf} -o {output.counts} {input}
+        """
